@@ -9,7 +9,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="#aa000000"
+        android:background="#212121"
         android:paddingLeft="10dp"
         android:paddingRight="10dp">
 
@@ -23,6 +23,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:textSize="18sp"
                 android:gravity="center_vertical"
                 android:id="@+id/dar_rate_element"
                 android:textColor="@android:color/white"

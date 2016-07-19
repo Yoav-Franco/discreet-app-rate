@@ -87,7 +87,7 @@ public class AppRate {
         instance.starRatingMarginDimension = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10, activity.getResources().getDisplayMetrics());
         return instance;
     }
-	
+
 	@SuppressLint("NewApi")
 	public static AppRate with(Activity activity, String overridePackageName) {
 		AppRate instance = AppRate.with(activity);
@@ -291,7 +291,7 @@ public class AppRate {
      *
      * The view will be inflated and respects two ids. {@code dar_close} and {@code dar_rate_element}.
      * The text of the {@code dar_rate_element} will be set with {@link #text(String)} or {@link #text(int)}.
-     * 
+     *
      * An example XML layout file might look like
      * <pre>
      *     {@code <LinearLayout
@@ -327,7 +327,7 @@ public class AppRate {
             </LinearLayout>
      *     }
      * </pre>
-     * 
+     *
      * @param view the view to display
      * @return the {@link AppRate} instance
      */
@@ -696,16 +696,12 @@ public class AppRate {
 
                 rateElement.setTextColor(Color.BLACK);
 
-                container.setBackgroundColor(0X88ffffff);
-
                 setBackgroundDrawable(close, activity.getResources().getDrawable(R.drawable.selectable_button_light));
 
             } else {
                 Drawable d = activity.getResources().getDrawable(R.drawable.ic_action_remove);
                 d.clearColorFilter();
                 ((ImageView) close).setImageDrawable(d);
-
-                container.setBackgroundColor(0Xaa000000);
 
                 setBackgroundDrawable(close, activity.getResources().getDrawable(R.drawable.selectable_button_dark));
 
