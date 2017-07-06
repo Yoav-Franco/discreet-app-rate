@@ -8,15 +8,18 @@ import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.InsetDrawable;
 import android.net.Uri;
 import android.os.Build;
+import android.preference.PreferenceManager;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.InflateException;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
@@ -26,6 +29,7 @@ import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
@@ -39,11 +43,11 @@ public class AppRate {
     protected static final String PREFS_NAME = "app_rate_prefs";
     private static final String KEY_ELAPSED_TIME = "elapsed_time";
     private static final String KEY_COUNT = "count";
-    private static final String KEY_CLICKED = "clicked";
     protected static final String KEY_LAST_CRASH = "last_crash";
     private static final String KEY_MONITOR_START = "monitor_start";
     private static final String KEY_MONITOR_TOTAL = "monitor_total";
     private static final String KEY_LAST_COUNT_UPDATE = "last_count_update";
+    private static final String KEY_USER_RATED_APP = "user_rated_app";
     private Activity activity;
     private String text;
     private int initialLaunchCount = 5;
@@ -63,14 +67,22 @@ public class AppRate {
     private int view;
     private boolean starRating = false;
     private int maxStars = 5;
-    private int minStarsForPositive = 3;
+    private int minStarsForPositive = 5;
     private OnStarRateListener onStarRateListener;
     private float starRatingDimension;
     private float starRatingMarginDimension;
     private ViewGroup mainView;
+    private boolean showIfAlreadyRated;
 
-    private AppRate(Activity activity) {
+    public AppRate(Activity activity) {
         this.activity = activity;
+        this.showIfAlreadyRated = false;
+        this.text = activity.getString(R.string.dra_rate_app);
+        this.settings = activity.getSharedPreferences(PREFS_NAME, 0);
+        this.editor = this.settings.edit();
+        this.packageName = activity.getPackageName();
+        this.starRatingDimension = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 24, activity.getResources().getDisplayMetrics());
+        this.starRatingMarginDimension = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10, activity.getResources().getDisplayMetrics());
     }
 
 	public static AppRate with(Activity activity) {
@@ -346,6 +358,11 @@ public class AppRate {
         return starRating(starRating, maxStars, minStarsForPositive);
     }
 
+    public AppRate showIfAlreadyRated(boolean showIfAlreadyRated) {
+        this.showIfAlreadyRated = showIfAlreadyRated;
+        return this;
+    }
+
     /**
      * Set whether to allow the user to rate by choosing a star rating
      *
@@ -361,6 +378,12 @@ public class AppRate {
         return this;
     }
 
+    public void setStarRating(boolean starRating, int maxStars, int minStarsForPositive) {
+        this.starRating = starRating;
+        this.maxStars = maxStars;
+        this.minStarsForPositive = minStarsForPositive;
+    }
+
     /**
      * Set callbacks for when the user enters a star rating
      *
@@ -370,6 +393,10 @@ public class AppRate {
     public AppRate starRatingListener(OnStarRateListener starRateListener) {
         this.onStarRateListener = starRateListener;
         return this;
+    }
+
+    public void setRatingListener(OnStarRateListener starRateListener) {
+        this.onStarRateListener = starRateListener;
     }
 
     /*
@@ -442,7 +469,7 @@ public class AppRate {
 
         }
 
-        boolean clicked = settings.getBoolean(KEY_CLICKED, false);
+        boolean clicked = settings.getBoolean(KEY_USER_RATED_APP, false) && !showIfAlreadyRated;
         if (clicked) return;
         int count = settings.getInt(KEY_COUNT, 0);
         if (count == initialLaunchCount) {
@@ -466,7 +493,7 @@ public class AppRate {
     public void reset() {
         if (debug) LogD("Count reset");
         editor.putInt(KEY_COUNT, 0);
-        editor.putBoolean(KEY_CLICKED, false);
+        editor.putBoolean(KEY_USER_RATED_APP, false);
         editor.putLong(KEY_LAST_CRASH, 0L);
         commitEditor();
     }
@@ -486,7 +513,7 @@ public class AppRate {
      * Avoid showing the view again. Can only be undone by {@link #reset()}.
      */
     public void neverShowAgain() {
-        editor.putBoolean(KEY_CLICKED, true);
+        editor.putBoolean(KEY_USER_RATED_APP, true);
         commitEditor();
     }
 
@@ -561,11 +588,32 @@ public class AppRate {
     }
 
 
+    private View findViewAtPosition(View parent, int x, int y) {
+        if (parent instanceof ViewGroup) {
+            ViewGroup viewGroup = (ViewGroup) parent;
+            for (int i = 0; i < viewGroup.getChildCount(); i++) {
+                View child = viewGroup.getChildAt(i);
+                View viewAtPosition = findViewAtPosition(child, x, y);
+                if (viewAtPosition != null) {
+                    return viewAtPosition;
+                }
+            }
+            return null;
+        } else {
+            Rect rect = new Rect();
+            parent.getGlobalVisibleRect(rect);
+            if (rect.contains(x, y)) {
+                return parent;
+            } else {
+                return null;
+            }
+        }
+    }
+
     public AppRate fromTop(boolean fromTop) {
         this.fromTop = fromTop;
         return this;
     }
-
 
     @SuppressLint("NewApi")
     private void showAppRate() {
@@ -584,41 +632,40 @@ public class AppRate {
             mainView = (ViewGroup) activity.getLayoutInflater().inflate(R.layout.app_rate, null);
         }
 
-
-        View close = (View) mainView.findViewById(R.id.dar_close);
+        View closeView = mainView.findViewById(R.id.dar_close);
         TextView rateElement = (TextView) mainView.findViewById(R.id.dar_rate_element);
         ViewGroup container = (ViewGroup) mainView.findViewById(R.id.dar_container);
-        ViewGroup starContainer = (ViewGroup) mainView.findViewById(R.id.dar_star_container);
+        final ViewGroup starContainer = (ViewGroup) mainView.findViewById(R.id.dar_star_container);
 
         final String packageName = this.packageName;
 
         if (container != null) {
             if (fromTop) {
                 if (container.getParent() instanceof FrameLayout) {
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    lp.gravity = Gravity.TOP;
-                    container.setLayoutParams(lp);
+                    FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    layoutParams.gravity = Gravity.TOP;
+                    container.setLayoutParams(layoutParams);
                 } else if (container.getParent() instanceof RelativeLayout) {
-                    RelativeLayout.LayoutParams lp = (RelativeLayout.LayoutParams) container.getLayoutParams();
-                    lp.addRule(RelativeLayout.ALIGN_PARENT_TOP);
-                    container.setLayoutParams(lp);
+                    RelativeLayout.LayoutParams layoutParams = (RelativeLayout.LayoutParams) container.getLayoutParams();
+                    layoutParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+                    container.setLayoutParams(layoutParams);
                 }
             } else {
                 if (container.getParent() instanceof FrameLayout) {
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    lp.gravity = Gravity.BOTTOM;
-                    container.setLayoutParams(lp);
+                    FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    layoutParams.gravity = Gravity.BOTTOM;
+                    container.setLayoutParams(layoutParams);
                 } else if (container.getParent() instanceof RelativeLayout) {
-                    RelativeLayout.LayoutParams lp = (RelativeLayout.LayoutParams) container.getLayoutParams();
-                    lp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
-                    container.setLayoutParams(lp);
+                    RelativeLayout.LayoutParams layoutParams = (RelativeLayout.LayoutParams) container.getLayoutParams();
+                    layoutParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+                    container.setLayoutParams(layoutParams);
                 }
             }
         }
 
         if (rateElement != null) {
             rateElement.setText(text);
-            if ( !starRating ) {
+            if (!starRating) {
                 rateElement.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -628,8 +675,8 @@ public class AppRate {
             }
         }
 
-        if (close != null) {
-            close.setOnClickListener(new View.OnClickListener() {
+        if (closeView != null) {
+            closeView.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     hideAllViews(mainView);
@@ -639,20 +686,61 @@ public class AppRate {
         }
 
         if (starContainer != null ) {
-            if ( starRating ) {
+            if (starRating) {
                 starContainer.setVisibility(View.VISIBLE);
 
-                Drawable starDrawable = getDrawableForStarRating(false);
+                final Drawable starDrawable = getDrawableForStarRating(false);
 
                 for ( int i = 1; i <= maxStars; i++ ) {
                     View starView = new View(activity);
                     starView.setTag(i);
-                    ViewGroup.LayoutParams lp = new ViewGroup.MarginLayoutParams((int) starRatingDimension + (i == maxStars ? 0 : (int) starRatingMarginDimension), (int) starRatingDimension + (int) (starRatingMarginDimension * 1.5f));
-                    starView.setLayoutParams(lp);
+                    LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                            (int)starRatingDimension,
+                            (int)starRatingDimension
+                    );
+                    params.setMargins((int) starRatingMarginDimension/2, 0, (int) starRatingMarginDimension/2, 0);
+                    starView.setLayoutParams(params);
 
-                    InsetDrawable starInsetDrawable = getInsetDrawableForStarRating(starDrawable, i);
+                    starView.setOnTouchListener(new View.OnTouchListener() {
+                        @Override
+                        public boolean onTouch(View view, MotionEvent motionEvent) {
+                            Drawable filledStarDrawable = getDrawableForStarRating(true);
+                            View currentHooverView = findViewAtPosition(starContainer, (int) motionEvent.getRawX(), (int) motionEvent.getRawY());
+                            if (currentHooverView == null) return false;
 
-                    setBackgroundDrawable(starView, starInsetDrawable);
+                            int clickedRating = (Integer) currentHooverView.getTag();
+                            for (int i = 0; i < clickedRating; i++) {
+                                View starView = ((ViewGroup) view.getParent()).getChildAt(i);
+                                setBackgroundDrawable(starView, filledStarDrawable);
+                            }
+
+                            for (int i = maxStars - 1; i >= clickedRating; i--) {
+                                View starView = ((ViewGroup) view.getParent()).getChildAt(i);
+                                setBackgroundDrawable(starView, starDrawable);
+                            }
+
+                            if (motionEvent.getAction() == MotionEvent.ACTION_UP) {
+                                if ( onStarRateListener == null ) {
+                                    performRating(packageName);
+                                } else {
+                                    if ( clickedRating >= minStarsForPositive ) {
+                                        performRating(packageName);
+                                        onStarRateListener.onPositiveRating(clickedRating);
+
+                                        // do not show appRate again if specified in the future
+                                        neverShowAgain();
+                                    } else {
+                                        onStarRateListener.onNegativeRating(clickedRating);
+                                    }
+                                }
+
+                                hide();
+                            }
+                            return true;
+                        }
+                    });
+
+                    setBackgroundDrawable(starView, starDrawable);
 
                     starView.setOnClickListener(new View.OnClickListener() {
                         @Override
@@ -662,9 +750,7 @@ public class AppRate {
                             int clickedRating = (Integer) view.getTag();
                             for ( int i = 0; i < clickedRating; i ++ ) {
                                 View starView = ((ViewGroup) view.getParent()).getChildAt(i);
-                                InsetDrawable starInsetFilledDrawable = getInsetDrawableForStarRating(filledStarDrawable, i);
-
-                                setBackgroundDrawable(starView, starInsetFilledDrawable);
+                                setBackgroundDrawable(starView, filledStarDrawable);
                             }
 
                             if ( onStarRateListener == null ) {
@@ -677,6 +763,8 @@ public class AppRate {
                                     onStarRateListener.onNegativeRating(clickedRating);
                                 }
                             }
+
+                            hide();
                         }
                     });
 
@@ -692,18 +780,18 @@ public class AppRate {
                 PorterDuff.Mode mMode = PorterDuff.Mode.SRC_ATOP;
                 Drawable d = activity.getResources().getDrawable(R.drawable.ic_action_remove);
                 d.setColorFilter(Color.BLACK, mMode);
-                ((ImageView) close).setImageDrawable(d);
+                ((ImageView) closeView).setImageDrawable(d);
 
                 rateElement.setTextColor(Color.BLACK);
 
-                setBackgroundDrawable(close, activity.getResources().getDrawable(R.drawable.selectable_button_light));
+                setBackgroundDrawable(closeView, activity.getResources().getDrawable(R.drawable.selectable_button_light));
 
             } else {
                 Drawable d = activity.getResources().getDrawable(R.drawable.ic_action_remove);
                 d.clearColorFilter();
-                ((ImageView) close).setImageDrawable(d);
+                ((ImageView) closeView).setImageDrawable(d);
 
-                setBackgroundDrawable(close, activity.getResources().getDrawable(R.drawable.selectable_button_dark));
+                setBackgroundDrawable(closeView, activity.getResources().getDrawable(R.drawable.selectable_button_dark));
 
             }
         }
@@ -765,7 +853,6 @@ public class AppRate {
                 }
             }
         }
-
 
         if (delay > 0) {
             activity.getWindow().getDecorView().postDelayed(new Runnable() {
@@ -854,7 +941,7 @@ public class AppRate {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         activity.startActivity(intent);
         hideAllViews(mainView);
-        editor.putBoolean(KEY_CLICKED, true);
+        editor.putBoolean(KEY_USER_RATED_APP, true);
         commitEditor();
         if (onShowListener != null) onShowListener.onRateAppClicked();
     }
@@ -878,6 +965,7 @@ public class AppRate {
     private void setBackgroundDrawable ( View view, Drawable drawable ) {
         if (Build.VERSION.SDK_INT >= 16) {
             view.setBackground(drawable);
+
         } else {
             view.setBackgroundDrawable(drawable);
         }
